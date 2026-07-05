@@ -26,19 +26,50 @@ A powerful Telegram bot that provides instant word definitions, synonyms, antony
 | `/wordoftheday` | Word of the day | `/wordoftheday` |
 | `/stats` | Bot statistics | `/stats` |
 
-## 🚀 Deployment
+## 🚀 Deployment on Railway
 
-### Deploy on Railway
+### 1. Get Bot Token from Telegram
+- Open Telegram
+- Search for `@BotFather`
+- Send: `/newbot`
+- Name: `I Word Bot`
+- Username: `IwordBbot`
+- Copy the token you receive
 
-1. **Fork this repository** on GitHub
-2. **Go to [Railway.app](https://railway.app)**
-3. **Click "Start a New Project"**
-4. **Select "Deploy from GitHub repo"**
-5. **Connect your GitHub account**
-6. **Select the forked repository**
-7. **Add Environment Variable:**
+### 2. Deploy on Railway
+1. Fork this repository on GitHub
+2. Go to [Railway.app](https://railway.app)
+3. Click "Start a New Project"
+4. Select "Deploy from GitHub repo"
+5. Connect your GitHub account
+6. Select the repository
+7. Add Environment Variable:
    - Key: `TELEGRAM_BOT_TOKEN`
-   - Value: Your bot token from @BotFather
-8. **Click "Deploy"** - Done! 🎉
+   - Value: Your bot token from BotFather
+8. Click "Deploy"
 
-### Environment Variables
+### 3. Test Your Bot
+Open Telegram and send:
+- `/start` to initialize
+- Type `serendipity` to get definition
+- `/wordoftheday` for word of the day
+
+## 🔧 Local Development
+
+```bash
+# Clone repository
+git clone https://github.com/yourusername/IwordBbot.git
+cd IwordBbot
+
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Set environment variable
+export TELEGRAM_BOT_TOKEN=your_token_here
+
+# Run the bot
+python bot.py
