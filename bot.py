@@ -1,6 +1,6 @@
 import os
-import json
 import logging
+import sys
 import random
 from datetime import datetime
 from typing import Optional, Dict, List
@@ -9,36 +9,41 @@ import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
-# ==================== CONFIGURATION ====================
+# ==================== LOGGING SETUP ====================
 
-# Enable logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
+    level=logging.INFO,
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
 )
 logger = logging.getLogger(__name__)
+
+# ==================== CONFIGURATION ====================
 
 # Get bot token from environment variable
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 if not TOKEN:
-    logger.error("TELEGRAM_BOT_TOKEN environment variable not set!")
-    raise ValueError("TELEGRAM_BOT_TOKEN is required")
+    logger.error("❌ TELEGRAM_BOT_TOKEN environment variable not set!")
+    sys.exit(1)
+
+logger.info("✅ Bot token loaded successfully")
 
 # Dictionary API
 DICT_API_URL = "https://api.dictionaryapi.dev/api/v2/entries/en/"
-WORDS_API_URL = "https://api.datamuse.com/words"
 
 # Cache dictionary
-word_cache: Dict[str, Dict] = {}
+word_cache: Dict[str, List] = {}
 CACHE_SIZE = 100
 
 # ==================== CORE FUNCTIONS ====================
 
-def get_cached_word(word: str) -> Optional[Dict]:
+def get_cached_word(word: str) -> Optional[List]:
     """Get word from cache if available."""
     return word_cache.get(word.lower())
 
-def cache_word(word: str, data: Dict) -> None:
+def cache_word(word: str, data: List) -> None:
     """Cache word data with size limit."""
     word_lower = word.lower()
     if len(word_cache) >= CACHE_SIZE:
@@ -46,16 +51,19 @@ def cache_word(word: str, data: Dict) -> None:
         oldest_key = next(iter(word_cache))
         del word_cache[oldest_key]
     word_cache[word_lower] = data
+    logger.info(f"📚 Cached: {word} (Cache size: {len(word_cache)})")
 
-def fetch_word_data(word: str) -> Optional[Dict]:
+def fetch_word_data(word: str) -> Optional[List]:
     """Fetch word data from API with error handling."""
     try:
         # Check cache first
         cached = get_cached_word(word)
         if cached:
+            logger.info(f"📖 Cache hit: {word}")
             return cached
 
         # Fetch from API
+        logger.info(f"🌐 Fetching: {word}")
         response = requests.get(f"{DICT_API_URL}{word}", timeout=10)
         
         if response.status_code == 200:
@@ -63,21 +71,22 @@ def fetch_word_data(word: str) -> Optional[Dict]:
             cache_word(word, data)
             return data
         elif response.status_code == 404:
+            logger.warning(f"❌ Word not found: {word}")
             return None
         else:
-            logger.error(f"API error: {response.status_code}")
+            logger.error(f"⚠️ API error {response.status_code}: {word}")
             return None
             
     except requests.exceptions.Timeout:
-        logger.error(f"Timeout fetching word: {word}")
+        logger.error(f"⏰ Timeout fetching: {word}")
         return None
     except requests.exceptions.RequestException as e:
-        logger.error(f"Request error: {e}")
+        logger.error(f"🚫 Request error: {e}")
         return None
 
 def format_definition(data: List[Dict], word: str) -> str:
     """Format word data into a readable message."""
-    result = f"📖 **{word.capitalize()}**\n"
+    result = f"📖 *{word.capitalize()}*\n"
     result += "═" * 30 + "\n"
     
     for entry in data:
@@ -90,14 +99,14 @@ def format_definition(data: List[Dict], word: str) -> str:
         # Add meanings
         for meaning in entry.get("meanings", []):
             part_of_speech = meaning.get("partOfSpeech", "Unknown").capitalize()
-            result += f"\n📝 **{part_of_speech}**\n"
+            result += f"\n📝 *{part_of_speech}*\n"
             
             definitions = meaning.get("definitions", [])
             for idx, definition in enumerate(definitions[:3], 1):
                 result += f"  {idx}. {definition.get('definition', '')}\n"
                 
                 if "example" in definition:
-                    result += f"     📌 *Example:* {definition['example']}\n"
+                    result += f"     📌 _Example:_ {definition['example']}\n"
     
     return result
 
@@ -110,10 +119,10 @@ def format_synonyms(word: str, data: List[Dict]) -> str:
                 if "synonyms" in definition:
                     synonyms.extend(definition["synonyms"])
     
-    synonyms = list(set(synonyms))[:10]  # Remove duplicates and limit
+    synonyms = list(set(synonyms))[:10]
     
     if synonyms:
-        result = f"🔄 **Synonyms for '{word}'**\n"
+        result = f"🔄 *Synonyms for '{word}'*\n"
         result += "═" * 30 + "\n"
         result += "\n".join(f"• {s}" for s in synonyms)
         return result
@@ -131,7 +140,7 @@ def format_antonyms(word: str, data: List[Dict]) -> str:
     antonyms = list(set(antonyms))[:10]
     
     if antonyms:
-        result = f"🔄 **Antonyms for '{word}'**\n"
+        result = f"🔄 *Antonyms for '{word}'*\n"
         result += "═" * 30 + "\n"
         result += "\n".join(f"• {a}" for a in antonyms)
         return result
@@ -149,7 +158,7 @@ def format_examples(word: str, data: List[Dict]) -> str:
     examples = examples[:5]
     
     if examples:
-        result = f"💡 **Example sentences for '{word}'**\n"
+        result = f"💡 *Example sentences for '{word}'*\n"
         result += "═" * 30 + "\n"
         result += "\n".join(f"• {e}" for e in examples)
         return result
@@ -171,9 +180,9 @@ def get_word_of_the_day() -> str:
     words = [
         "serendipity", "ephemeral", "eloquent", "ineffable", "paradox",
         "resilient", "tenacious", "ubiquitous", "verbose", "wistful",
-        "mellifluous", "effervescent", "luminous", "ethereal", "zenith"
+        "mellifluous", "effervescent", "luminous", "ethereal", "zenith",
+        "nostalgia", "euphoria", "cascade", "whimsical", "benevolent"
     ]
-    # Use date to get consistent word of the day
     day_of_year = datetime.now().timetuple().tm_yday
     return words[day_of_year % len(words)]
 
@@ -183,19 +192,20 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     """Handle /start command."""
     user = update.effective_user
     welcome_text = (
-        f"👋 Hello **{user.first_name}**!\n\n"
-        "📖 Welcome to **I Word Bot** - Your Live Dictionary!\n\n"
-        "🔍 **Quick Start:**\n"
+        f"👋 Hello *{user.first_name}*!\n\n"
+        "📖 Welcome to *I Word Bot* - Your Live Dictionary!\n\n"
+        "🔍 *Quick Start:*\n"
         "• Type any word to get its definition\n"
         "• Use commands for more features\n\n"
-        "📚 **Commands:**\n"
+        "📚 *Commands:*\n"
         "• /define `<word>` - Full definition\n"
         "• /synonym `<word>` - Find synonyms\n"
         "• /antonym `<word>` - Find antonyms\n"
         "• /example `<word>` - See examples\n"
         "• /pronounce `<word>` - Hear pronunciation\n"
         "• /wordoftheday - Word of the day\n"
-        "• /help - Show all commands\n\n"
+        "• /help - Show all commands\n"
+        "• /stats - Bot statistics\n\n"
         "✨ Start typing any word now! 🚀"
     )
     
@@ -215,19 +225,20 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /help command."""
     help_text = (
-        "📚 **I Word Bot Commands**\n\n"
-        "**General Commands:**\n"
+        "📚 *I Word Bot Commands*\n\n"
+        "*General Commands:*\n"
         "/start - Start the bot\n"
         "/help - Show this help\n\n"
-        "**Dictionary Commands:**\n"
+        "*Dictionary Commands:*\n"
         "/define `<word>` - Get complete definition\n"
         "/synonym `<word>` - Find synonyms\n"
         "/antonym `<word>` - Find antonyms\n"
         "/example `<word>` - See example sentences\n"
         "/pronounce `<word>` - Get pronunciation\n"
-        "/wordoftheday - Get word of the day\n\n"
-        "💡 **Tip:** Just type any word to get its definition instantly!\n\n"
-        "🔗 **More:**\n"
+        "/wordoftheday - Get word of the day\n"
+        "/stats - Bot statistics\n\n"
+        "💡 *Tip:* Just type any word to get its definition instantly!\n\n"
+        "🔗 *More:*\n"
         "• Word definitions include pronunciation\n"
         "• Examples help understand usage\n"
         "• Synonyms and antonyms expand vocabulary"
@@ -252,7 +263,7 @@ async def define_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(definition, parse_mode="Markdown")
     else:
         await update.message.reply_text(
-            f"❌ Sorry, I couldn't find the definition for **{word}**.\n"
+            f"❌ Sorry, I couldn't find the definition for *{word}*.\n"
             "Please check the spelling and try again.",
             parse_mode="Markdown"
         )
@@ -275,7 +286,7 @@ async def synonym_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text(result, parse_mode="Markdown")
     else:
         await update.message.reply_text(
-            f"❌ Could not find synonyms for **{word}**.",
+            f"❌ Could not find synonyms for *{word}*.",
             parse_mode="Markdown"
         )
 
@@ -297,7 +308,7 @@ async def antonym_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text(result, parse_mode="Markdown")
     else:
         await update.message.reply_text(
-            f"❌ Could not find antonyms for **{word}**.",
+            f"❌ Could not find antonyms for *{word}*.",
             parse_mode="Markdown"
         )
 
@@ -319,7 +330,7 @@ async def example_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text(result, parse_mode="Markdown")
     else:
         await update.message.reply_text(
-            f"❌ Could not find examples for **{word}**.",
+            f"❌ Could not find examples for *{word}*.",
             parse_mode="Markdown"
         )
 
@@ -342,22 +353,22 @@ async def pronounce_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             if pronunciation.startswith("http"):
                 await update.message.reply_audio(
                     pronunciation,
-                    caption=f"🔊 Pronunciation of **{word}**",
+                    caption=f"🔊 Pronunciation of *{word}*",
                     parse_mode="Markdown"
                 )
             else:
                 await update.message.reply_text(
-                    f"🔊 **{word}** - {pronunciation}",
+                    f"🔊 *{word}* - {pronunciation}",
                     parse_mode="Markdown"
                 )
         else:
             await update.message.reply_text(
-                f"❌ No pronunciation found for **{word}**.",
+                f"❌ No pronunciation found for *{word}*.",
                 parse_mode="Markdown"
             )
     else:
         await update.message.reply_text(
-            f"❌ Could not find pronunciation for **{word}**.",
+            f"❌ Could not find pronunciation for *{word}*.",
             parse_mode="Markdown"
         )
 
@@ -369,7 +380,7 @@ async def word_of_the_day_command(update: Update, context: ContextTypes.DEFAULT_
     if data:
         definition = format_definition(data, word)
         await update.message.reply_text(
-            f"🌟 **Word of the Day** 🌟\n\n{definition}",
+            f"🌟 *Word of the Day* 🌟\n\n{definition}",
             parse_mode="Markdown"
         )
     else:
@@ -380,14 +391,14 @@ async def word_of_the_day_command(update: Update, context: ContextTypes.DEFAULT_
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /stats command."""
     stats_text = (
-        "📊 **Bot Statistics**\n"
+        "📊 *Bot Statistics*\n"
         "═" * 30 + "\n\n"
-        f"📚 **Words in Cache:** {len(word_cache)}\n"
-        f"🔄 **Cache Limit:** {CACHE_SIZE}\n"
-        f"⏰ **Uptime:** Since deployment\n\n"
-        "🔍 **Dictionary API:** FreeDictionaryAPI\n"
-        "💻 **Status:** 🟢 Online\n\n"
-        "📖 **Tip:** Type any word to look it up!"
+        f"📚 *Words in Cache:* {len(word_cache)}\n"
+        f"🔄 *Cache Limit:* {CACHE_SIZE}\n"
+        f"⏰ *Uptime:* Since deployment\n\n"
+        "🔍 *Dictionary API:* FreeDictionaryAPI\n"
+        "💻 *Status:* 🟢 Online\n\n"
+        "📖 *Tip:* Type any word to look it up!"
     )
     await update.message.reply_text(stats_text, parse_mode="Markdown")
 
@@ -404,7 +415,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(definition, parse_mode="Markdown")
     else:
         await update.message.reply_text(
-            f"❌ Sorry, I couldn't find the definition for **{word}**.\n"
+            f"❌ Sorry, I couldn't find the definition for *{word}*.\n"
             "Please check the spelling and try again, or use a different word.",
             parse_mode="Markdown"
         )
@@ -425,7 +436,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle errors."""
-    logger.error(f"Update {update} caused error {context.error}")
+    logger.error(f"❌ Update {update} caused error: {context.error}")
     
     if update and update.effective_message:
         await update.effective_message.reply_text(
@@ -437,36 +448,42 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 def main() -> None:
     """Start the bot."""
-    logger.info("Starting I Word Bot...")
+    logger.info("🚀 Starting I Word Bot...")
+    logger.info(f"🤖 Bot Token: {TOKEN[:15]}...")
     
-    # Create application
-    application = Application.builder().token(TOKEN).build()
-    
-    # Add command handlers
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("define", define_command))
-    application.add_handler(CommandHandler("synonym", synonym_command))
-    application.add_handler(CommandHandler("antonym", antonym_command))
-    application.add_handler(CommandHandler("example", example_command))
-    application.add_handler(CommandHandler("pronounce", pronounce_command))
-    application.add_handler(CommandHandler("wordoftheday", word_of_the_day_command))
-    application.add_handler(CommandHandler("stats", stats_command))
-    
-    # Add callback query handler
-    application.add_handler(CallbackQueryHandler(button_callback_handler))
-    
-    # Add message handler for text messages
-    application.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message)
-    )
-    
-    # Add error handler
-    application.add_error_handler(error_handler)
-    
-    # Start bot
-    logger.info("Bot started successfully!")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    try:
+        # Create application
+        application = Application.builder().token(TOKEN).build()
+        
+        # Add command handlers
+        application.add_handler(CommandHandler("start", start_command))
+        application.add_handler(CommandHandler("help", help_command))
+        application.add_handler(CommandHandler("define", define_command))
+        application.add_handler(CommandHandler("synonym", synonym_command))
+        application.add_handler(CommandHandler("antonym", antonym_command))
+        application.add_handler(CommandHandler("example", example_command))
+        application.add_handler(CommandHandler("pronounce", pronounce_command))
+        application.add_handler(CommandHandler("wordoftheday", word_of_the_day_command))
+        application.add_handler(CommandHandler("stats", stats_command))
+        
+        # Add callback query handler
+        application.add_handler(CallbackQueryHandler(button_callback_handler))
+        
+        # Add message handler for text messages
+        application.add_handler(
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message)
+        )
+        
+        # Add error handler
+        application.add_error_handler(error_handler)
+        
+        # Start bot with polling
+        logger.info("✅ Bot started successfully! Ready to serve...")
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
+        
+    except Exception as e:
+        logger.error(f"💥 Fatal error: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
