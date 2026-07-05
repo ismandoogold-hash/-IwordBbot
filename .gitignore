@@ -15,6 +15,7 @@ build/
 # Environment variables
 .env
 *.env
+.env.local
 
 # Railway
 .railway/
